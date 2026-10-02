@@ -57,9 +57,10 @@ HJAELP_MAERKE = "<!-- robot:hjaelp -->"
 HJAELP = HJAELP_MAERKE + """
 🤔 Jeg kunne ikke finde nogen opgaver i det her issue.
 
-Indsæt tabellen fra referatet med **Ctrl+V** – så laver GitHub den om til en tabel. Den skal
-have kolonnerne *Opgave*, *Ansvarlig* og *Deadline* (overskrifterne må gerne mangle, så læser
-jeg dem i den rækkefølge). Du kan også skrive én opgave pr. linje:
+Kopiér tabellen fra referatet i Google Docs og sæt den ind med **Ctrl+V** (ikke Ctrl+Shift+V) –
+så laver GitHub den om til en tabel. Den skal have kolonnerne *Opgave*, *Person* (eller
+*Ansvarlig*) og *Deadline* (overskrifterne må gerne mangle, så læser jeg dem i den rækkefølge).
+Du kan også skrive én opgave pr. linje:
 
 ```
 Book hal til opstartsfest – Søren – 3/10
@@ -329,9 +330,27 @@ def fra_linjer(tekst):
     return raekker
 
 
+def uden_html(tekst):
+    """Når man kopierer en tabel fra Google Docs og sætter den ind i GitHub, bliver tabellen til
+    Markdown, men Google Docs' HTML omkring den kommer med (<b id="docs-internal-guid-…"> …),
+    og "Næste møde: 29/10" over tabellen ender inde i den HTML. Linjer med | (tabellen) røres ikke."""
+    ud = []
+    for linje in tekst.split("\n"):
+        if "|" in linje or "<" not in linje:
+            ud.append(linje)
+            continue
+        linje = re.sub(r"<(?:br|/p|/div|/li|/h[1-6]|/tr|/table)\b[^>]*>", "\n", linje, flags=re.I)
+        ud.append(html.unescape(re.sub(r"<[^>]+>", "", linje)).replace("\xa0", " "))
+    return "\n".join(ud)
+
+
+# To afsnit i samme celle i Google Docs bliver klistret sammen ("Haraldslund:Klar kl. 17")
+KLISTRET = re.compile(r"(?<=[a-zæøå0-9)][.:;!?])(?=[A-ZÆØÅ])")
+
+
 def find_opgaver(body, tvungen=False):
     """Returnerer (opgaver, næste_møde, problemer)."""
-    tekst = re.sub(r"<!--[\s\S]*?-->", "", body or "")
+    tekst = uden_html(re.sub(r"<!--[\s\S]*?-->", "", body or ""))
     naeste = find_naeste_moede(tekst)
     tabeller = find_tabeller(tekst)
     brugbare = []
@@ -357,7 +376,7 @@ def find_opgaver(body, tvungen=False):
                 continue
             if kortlaeg(celler):  # gentaget overskrift
                 continue
-            titel = rens(hent("opgave"))
+            titel = KLISTRET.sub(" ", rens(hent("opgave")))
             if not titel:
                 problemer.append(f"Række {nr} har ingen opgave: {' | '.join(rens(c) for c in celler if rens(c))}")
                 continue
@@ -369,7 +388,7 @@ def find_opgaver(body, tvungen=False):
                 "deadline": dl,
                 "deadline_tekst": dl_tekst,
                 "status": STATUS_ORD.get(status_tekst),
-                "noter": rens(hent("noter"), linjer=True),
+                "noter": KLISTRET.sub(" ", rens(hent("noter"), linjer=True)),
             })
     return opgaver, naeste, problemer
 
@@ -420,12 +439,17 @@ def behandl_import(issue, kendte):
             aabne.setdefault(norm_titel(i["title"]), i["number"])
 
     kilde = re.sub(r"^📥\s*", "", titel) or f"issue #{nr}"
-    oprettet, sprunget = [], []
+    oprettet, sprunget, set_ = [], [], set()
     for o in opgaver:
         if o["status"] in ("Færdig", "Droppet"):
             sprunget.append(f"{o['titel']} – står som {o['status'].lower()} i tabellen")
             continue
         noegle = norm_titel(o["titel"])
+        # Samme række to gange i samme issue (GitHub kan sætte en tabel med links ind to gange)
+        fingeraftryk = (noegle, tuple(p.lower() for p in o["personer"]), o["deadline"], o["deadline_tekst"])
+        if fingeraftryk in set_:
+            continue
+        set_.add(fingeraftryk)
         if noegle in aabne:
             sprunget.append(f"{o['titel']} – findes allerede som #{aabne[noegle]}")
             continue
