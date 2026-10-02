@@ -49,6 +49,21 @@ STATUS_ORD = {  # hvad der kan stå i en Status-kolonne
 IMPORT_LABEL = ("import", "EDEDED", "Tabel fra et møde – robotten har lavet opgaverne")
 PERSONFARVE = "C5DEF5"
 ALLE = {"alle", "bestyrelsen", "hele bestyrelsen", "fælles", "alle i bestyrelsen"}
+EMNE_BESKRIVELSE = "Emne – sat af robotten ud fra teksten. Ret gerne."
+
+# Bestyrelsen står i config.js (samme fil, som siden læser). Den her liste bruges kun, hvis
+# config.js mangler eller ikke kan læses.
+STANDARD_MEDLEMMER = [
+    {"navn": "Søren", "rolle": "formand", "emner": ["Forening & bestyrelse"]},
+    {"navn": "Heidi", "rolle": "sponsoransvarlig", "emner": ["Sponsorer & fonde"]},
+    {"navn": "Anna", "rolle": "ungdomsansvarlig", "emner": ["Ungdom"]},
+    {"navn": "Emma", "rolle": "tøj- og materialeansvarlig", "emner": ["Tøj & udstyr"]},
+    {"navn": "Ida", "rolle": "festansvarlig", "emner": ["Arrangementer & frivillige"]},
+    {"navn": "Sonja", "rolle": "", "emner": []},
+    {"navn": "Mikkel", "rolle": "kasserer", "emner": ["Økonomi"]},
+    {"navn": "Lars", "rolle": "kasserer", "emner": ["Økonomi"]},
+    {"navn": "Marcel", "rolle": "kredsansvarlig", "emner": ["Hold & turneringer"]},
+]
 MDR = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "maj": 5, "jun": 6,
        "jul": 7, "aug": 8, "sep": 9, "okt": 10, "nov": 11, "dec": 12}
 UGEDAG = ["man", "tir", "ons", "tor", "fre", "lør", "søn"]
@@ -281,6 +296,259 @@ def standard_roller(antal):
     return {navne[i]: i for i in range(min(antal, 4))}
 
 
+# ----------------------------------------------------------------------------- bestyrelsen
+def js_til_json(s):
+    """config.js er skrevet som et JavaScript-objekt. Gør det til JSON: fjerner kommentarer og
+    kommaer til sidst og sætter anførselstegn om nøgler uden."""
+    ud, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in "\"'":
+            j, buf = i + 1, []
+            while j < n and s[j] != c:
+                if s[j] == "\\" and j + 1 < n:
+                    buf.append(s[j:j + 2])
+                    j += 2
+                    continue
+                buf.append(s[j])
+                j += 1
+            tekst = "".join(buf)
+            if c == "'":
+                tekst = tekst.replace("\\'", "'").replace('"', '\\"')
+            ud.append('"' + tekst + '"')
+            i = j + 1
+            continue
+        if s.startswith("//", i):
+            j = s.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if s.startswith("/*", i):
+            j = s.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        m = re.match(r"[A-Za-z_$][\w$]*", s[i:])
+        if m and re.match(r"\s*:", s[i + m.end():]) and (not ud or not re.match(r"[\w$]", ud[-1][-1:])):
+            ud.append('"' + m.group(0) + '"')
+            i += m.end()
+            continue
+        ud.append(c)
+        i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(ud))
+
+
+def laes_bestyrelsen(sti=None):
+    """[{navn, rolle, emner}] fra config.js – kun de her kan få opgaver."""
+    sti = sti or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.js")
+    try:
+        tekst = open(sti, encoding="utf-8").read()
+        start = tekst.index("{", re.search(r"window\.BESTYRELSE\s*=", tekst).end())
+        data = json.loads(js_til_json(tekst[start:tekst.rindex("}") + 1]))
+        ud = []
+        for m in data.get("medlemmer") or []:
+            navn = str(m.get("navn") if isinstance(m, dict) else m or "").strip()
+            if navn:
+                ud.append({"navn": navn, "rolle": str((m.get("rolle") if isinstance(m, dict) else "") or "").strip(),
+                           "emner": [str(e) for e in ((m.get("emner") if isinstance(m, dict) else None) or [])]})
+        if ud:
+            return ud
+        print("config.js har ingen medlemmer – bruger standardlisten.")
+    except Exception as e:  # noqa: BLE001
+        print(f"Kunne ikke læse bestyrelsen i config.js ({e}) – bruger standardlisten.")
+    return [dict(m) for m in STANDARD_MEDLEMMER]
+
+
+def lav_navn(s):
+    return re.sub(r"\s+", " ", re.sub(r"[^\wæøåÆØÅ ]+", " ", str(s).lower())).strip()
+
+
+def find_medlem(navn, medlemmer):
+    """(navne, via_rolle). 'Marcel D' -> Marcel, 'kasserer Lars' -> Lars, 'Kassererne' -> Mikkel og Lars."""
+    n = lav_navn(navn)
+    if not n:
+        return [], False
+    foerste = n.split()[0]
+    for m in medlemmer:
+        mn = lav_navn(m["navn"])
+        if n == mn or foerste == mn.split()[0]:
+            return [m["navn"]], False
+    navngivne = [m["navn"] for m in medlemmer if navn_i(lav_navn(m["navn"]), n)]
+    if navngivne:
+        return navngivne, False
+    ramt = []
+    for m in medlemmer:
+        stamme = (lav_navn(m.get("rolle") or "").split() or [""])[0]
+        if len(stamme) >= 5 and n.startswith(stamme):
+            ramt.append(m["navn"])
+    return ramt, bool(ramt)
+
+
+def klassificer(navne, medlemmer):
+    """['Kassererne', 'Herre 1', 'Alle'] -> (['Mikkel', 'Lars'], ['Herre 1'], True)"""
+    bestyrelse, andre, alle = [], [], False
+    for n in navne:
+        if n == "Alle" or n.lower() in ALLE:
+            alle = True
+            continue
+        fundet, _ = find_medlem(n, medlemmer)
+        if fundet:
+            bestyrelse += [f for f in fundet if f not in bestyrelse]
+        elif n.lower() not in [a.lower() for a in andre]:
+            andre.append(n)
+    return bestyrelse, andre, alle
+
+
+def og_liste(navne):
+    navne = list(navne)
+    return navne[0] if len(navne) == 1 else ", ".join(navne[:-1]) + " og " + navne[-1]
+
+
+def navn_i(navn, tekst):
+    return re.search(r"(?<![\wæøå])" + re.escape(navn.lower()) + r"(?![\wæøå])", tekst.lower()) is not None
+
+
+# ----------------------------------------------------------------------------- emner
+# Samme regler som på siden (index.html). Ord: tekst tæller 1 (højst 2 gange), "~ord" tæller ½,
+# ("re", mønster[, vægt]) er et regulært udtryk. Det tidligste ord i teksten giver ekstra 0,3 point.
+GRAENSE_FOER = r"(?:^|[^a-z0-9æøåéü])"
+GRAENSE_EFTER = r"(?=[^a-z0-9æøåéü]|$)"
+
+
+class Emne:
+    def __init__(self, navn, farve, ord, personer=()):
+        self.navn, self.farve = navn, farve
+        self.regler = []
+        for o in ord:
+            if isinstance(o, tuple):
+                kilde = o[1]
+                if kilde.startswith(r"\b"):
+                    kilde = GRAENSE_FOER + kilde[2:]
+                if kilde.endswith(r"\b"):
+                    kilde = kilde[:-2] + GRAENSE_EFTER
+                self.regler.append((re.compile(kilde), o[2] if len(o) > 2 else 1.0))
+            elif o.startswith("~"):
+                self.regler.append((re.compile(re.escape(o[1:])), 0.5))
+            else:
+                self.regler.append((re.compile(re.escape(o)), 1.0))
+        self.personer = [re.compile(p) for p in personer]
+
+
+EMNER = [
+    Emne("Økonomi", "F6E3A1", ["økonomi", "kontingent", "betal", "faktura", "regnskab", "budget", "refusion",
+                               "mobilepay", "kasserer", "gæld", "penge", "takst", "udlæg", "indbetal", "opkræv",
+                               "bankkonto", "beløb", "~pris", "~gebyr", "tilskud", "moms", "løn"],
+         personer=[r"^kasserer(en|ne|e)?$"]),
+    Emne("Sponsorer & fonde", "C9E7D3", ["sponsor", "fond", "ansøgning", "bambusa", "kampagne", "donation",
+                                         "partner", "~støtte", "lodseddel", "lotteri"]),
+    Emne("Hold & turneringer", "CFE0F7", ["jyllandsserie", "turnering", "licens", "kredskontakt", "melde fra",
+                                          "kampprogram", "~serie", "division", "liga", "pokal", ("re", r"\bmix\b"),
+                                          "holdtilmeld", "~tilmeld", "spillere", ("re", r"\bspiller\b", 0.5),
+                                          "dobbelt klub", "klubskifte", ("re", r"\b(dame|herre)\s?\d\b", 0.5)]),
+    Emne("Trænere & kurser", "E2D7F5", ["træner", "trænerhjælp", "kursus", "kurset", "kurser",
+                                        ("re", r"\bdommer(e|ne|kursus|kurser|uddannelse)?\b"), "uddannelse", "dt-",
+                                        "instruktør", "nødløsning"]),
+    Emne("Ungdom", "FAD9C8", ["ungdom", ("re", r"\b[dhu]?u1\d\b"), "børn", "skoleforløb", "skole", "kickprojekt",
+                              "forælder", "forældre", "boldlanger", "junior"]),
+    Emne("Arrangementer & frivillige", "F7D0E1", ["fest", "julefrokost", "arrangement", "baren", ("re", r"\bbar\b"),
+                                                  "indkøb", "speaker", "hjemmekamp", "tjans", "frivillig",
+                                                  "stævneleder", "~stævne", "event", "afslutning", "reception",
+                                                  "jubilæum"]),
+    Emne("Tøj & udstyr", "D3EDF0", ["tøj", "trøje", "trøjen", "tryk", "merchandise", "udstyr", ("re", r"\bbolde?\b"),
+                                    ("re", r"\bnet(tet)?\b"), "hæverkurv", "dommerstol", "flyttekasse", "materiel",
+                                    "rekvisit"]),
+    Emne("Kommunikation", "ECE6D3", ["hjemmeside", "facebook", "instagram", "nyhedsbrev", "presse", "interview",
+                                     "dk4", ("re", r"\btv\b"), "volley-tv", "medie", "billede", "holdbeskrivelse",
+                                     "plakat", "annonce", "~opslag", "~chat", "~gruppebesked", "~manus"]),
+    Emne("Haller & lokaler", "DCE3EA", [("re", r"\bhal(len|ler|lerne|tid|tider)?\b"), "haltid", "nøgle", "klubhus",
+                                        "lokale", ("re", r"\brum(met)?\b"), "brik", "katedral", "computer", "~låne",
+                                        "lån af", "omklædning", "depot", ("re", r"\bskab(e|et)?\b")]),
+    Emne("Forening & bestyrelse", "E5E7EB", ["generalforsamling", "bestyrelse", "ordstyrer", "vedtægt", "referat",
+                                             "kommune", "forening", "forbund", "medlem", "gældsbrev", "underskrift",
+                                             "kontrakt", "~aftale", "strategi", "~næste sæson", "~dokument",
+                                             "forsikring", "gdpr"]),
+]
+ANDET = Emne("Andet", "EEEEEE", [])
+
+
+def gaet_emne(tekst, personer=()):
+    t = " " + re.sub(r"\s+", " ", str(tekst or "").lower()) + " "
+    point = [0.0] * len(EMNER)
+    tidligst, tidligst_i = None, -1
+    for i, e in enumerate(EMNER):
+        for regel, vaegt in e.regler:
+            antal = 0
+            for m in regel.finditer(t):
+                antal += 1
+                if tidligst is None or m.start() < tidligst:
+                    tidligst, tidligst_i = m.start(), i
+                if antal >= 2:
+                    break
+            point[i] += antal * vaegt
+        for navn in personer or []:
+            n = str(navn).lower().strip()
+            if any(p.search(n) for p in e.personer):
+                point[i] += 1
+    if tidligst_i >= 0:
+        point[tidligst_i] += 0.3
+    bedst, maks = -1, 0.0
+    for i, p in enumerate(point):
+        if p > maks + 1e-9:
+            bedst, maks = i, p
+    return EMNER[bedst] if bedst >= 0 else ANDET
+
+
+def norm_emne(s):
+    s = re.sub(r"^\s*(emne|kategori)\s*:\s*", "", str(s).lower())
+    s = re.sub(r"\bog\b", "&", s)
+    s = re.sub(r"[^\wæøå&]+", " ", s)
+    return re.sub(r"\s*&\s*", " & ", s).strip()
+
+
+def find_emne(navn):
+    """Emnet for en label eller et navn i config.js ('Økonomi', 'Tøj', 'Sponsorer og fonde')."""
+    n = norm_emne(navn)
+    if not n:
+        return None
+    for e in EMNER + [ANDET]:
+        en = norm_emne(e.navn)
+        if n == en or n == en.split(" ")[0]:
+            return e
+    return None
+
+
+def emne_ejere(emne, medlemmer):
+    return [m["navn"] for m in medlemmer if any(find_emne(x) is emne for x in m.get("emner") or [])]
+
+
+def fordel(personer_raa, tekst, medlemmer, emne=None, person_tekst=""):
+    """Hvem i bestyrelsen opgaven skal ligge hos, og hvad den skal hedde. Navne uden for bestyrelsen
+    bliver ikke labels: de skrives forrest i opgaven, og opgaven lægges hos den, der har emnet."""
+    bestyrelse, andre, alle = klassificer(personer_raa, medlemmer)
+    emne = emne or gaet_emne(tekst, personer_raa)
+    via_emne = False
+    if not bestyrelse and not alle:
+        ejere = emne_ejere(emne, medlemmer)
+        if ejere:
+            bestyrelse, via_emne = ejere, True
+    titel = tekst
+    if andre and not all(navn_i(a, tekst) for a in andre):
+        i_cellen = klassificer(personer(person_tekst), medlemmer) if person_tekst else ([], [], False)
+        rene = person_tekst and not i_cellen[0] and not i_cellen[2]    # kun folk uden for bestyrelsen
+        titel = f"{person_tekst if rene else og_liste(andre)}: {tekst}"
+    return {"bestyrelse": bestyrelse, "alle": alle, "andre": andre, "emne": emne, "via_emne": via_emne,
+            "titel": titel}
+
+
+def person_labels(f, kendte):
+    labels = [sikr_label("@" + p, PERSONFARVE, "I bestyrelsen", kendte) for p in f["bestyrelse"]]
+    if f["alle"]:
+        labels.append(sikr_label("@Alle", PERSONFARVE, "Hele bestyrelsen", kendte))
+    return labels
+
+
+def emne_label(emne, kendte):
+    return None if emne is ANDET else sikr_label(emne.navn, emne.farve, EMNE_BESKRIVELSE, kendte)
+
+
 def personer(celle):
     c = re.sub(r"\(.*?\)", " ", rens(celle))
     ud = []
@@ -385,6 +653,7 @@ def find_opgaver(body, tvungen=False):
             opgaver.append({
                 "titel": titel,
                 "personer": personer(hent("person")),
+                "person_tekst": re.sub(r"\s+", " ", rens(hent("person"))).strip(" ,;/"),
                 "deadline": dl,
                 "deadline_tekst": dl_tekst,
                 "status": STATUS_ORD.get(status_tekst),
@@ -417,12 +686,14 @@ def byg_titel(o):
     return titel
 
 
-def behandl_import(issue, kendte):
+def behandl_import(issue, kendte, medlemmer):
+    """Et 📥-issue (eller et issue med en tabel) bliver til én opgave pr. række. Returnerer True,
+    hvis issuet var en tabel."""
     nr = issue["number"]
     titel = (issue.get("title") or "").strip()
     if any(l["name"].lower() == IMPORT_LABEL[0] for l in issue.get("labels", [])):
         print(f"#{nr} er allerede behandlet.")
-        return
+        return True
     tvungen = titel.startswith("📥")
     opgaver, naeste, problemer = find_opgaver(issue.get("body") or "", tvungen)
     if not opgaver:
@@ -431,7 +702,7 @@ def behandl_import(issue, kendte):
             if not any(HJAELP_MAERKE in (k.get("body") or "") for k in tidligere):
                 kommenter(nr, HJAELP)
         print(f"#{nr}: ingen opgaver fundet.")
-        return
+        return tvungen
 
     aabne = {}
     for i in hent_alle("/issues?state=open&per_page=100"):
@@ -440,10 +711,15 @@ def behandl_import(issue, kendte):
 
     kilde = re.sub(r"^📥\s*", "", titel) or f"issue #{nr}"
     oprettet, sprunget, set_ = [], [], set()
+    andre_navne = []
     for o in opgaver:
         if o["status"] in ("Færdig", "Droppet"):
             sprunget.append(f"{o['titel']} – står som {o['status'].lower()} i tabellen")
             continue
+        # Kun bestyrelsen får labels. Andre navne skrives forrest i opgaven, og opgaven lægges hos
+        # den i bestyrelsen, der har emnet (se config.js).
+        f = fordel(o["personer"], o["titel"], medlemmer, person_tekst=o.get("person_tekst", ""))
+        o = dict(o, titel=f["titel"], fordeling=f)
         noegle = norm_titel(o["titel"])
         # Samme række to gange i samme issue (GitHub kan sætte en tabel med links ind to gange)
         fingeraftryk = (noegle, tuple(p.lower() for p in o["personer"]), o["deadline"], o["deadline_tekst"])
@@ -453,8 +729,10 @@ def behandl_import(issue, kendte):
         if noegle in aabne:
             sprunget.append(f"{o['titel']} – findes allerede som #{aabne[noegle]}")
             continue
-        labels = [sikr_label("@" + p, PERSONFARVE, "Ansvarlig" if p != "Alle" else "Hele bestyrelsen", kendte)
-                  for p in o["personer"]]
+        labels = person_labels(f, kendte)
+        el = emne_label(f["emne"], kendte)
+        if el:
+            labels.append(el)
         if o["status"]:
             labels.append(sikr_label(o["status"], *STATUS[o["status"]], kendte))
         krop = f"Oprettet af robotten fra #{nr} ({kilde})."
@@ -465,18 +743,32 @@ def behandl_import(issue, kendte):
         ny, _ = kald("POST", "/issues", {"title": byg_titel(o), "body": krop, "labels": labels})
         aabne[noegle] = ny["number"]
         oprettet.append((ny["number"], o))
-        print(f"Oprettet #{ny['number']}: {byg_titel(o)}")
+        for a in f["andre"]:
+            if a.lower() not in [x.lower() for x in andre_navne]:
+                andre_navne.append(a)
+        print(f"Oprettet #{ny['number']}: {byg_titel(o)}  {labels}")
         time.sleep(1)  # skån GitHubs grænse for mange oprettelser i træk
 
     dele = []
     if oprettet:
         dele.append(f"✅ **{len(oprettet)} {'opgave' if len(oprettet) == 1 else 'opgaver'} oprettet** – "
                     f"de ligger nu på [bestyrelsessiden]({SIDE}).\n")
-        dele.append("| | Opgave | Ansvarlig | Deadline |\n|---|---|---|---|")
+        dele.append("| | Opgave | Ansvarlig | Emne | Deadline |\n|---|---|---|---|---|")
         for n, o in oprettet:
+            f = o["fordeling"]
             dl = kort_dato(o["deadline"]) if o["deadline"] else (o["deadline_tekst"] or "–")
-            navne = ", ".join("Hele bestyrelsen" if p == "Alle" else p for p in o["personer"]) or "–"
-            dele.append(f"| #{n} | {o['titel'].replace('|', '/')} | {navne} | {dl} |")
+            navne = (["Hele bestyrelsen"] if f["alle"] else []) + f["bestyrelse"]
+            hvem = ", ".join(navne) + (" ¹" if f["via_emne"] else "") if navne else "– ²"
+            emne = f["emne"].navn if f["emne"] is not ANDET else "–"
+            dele.append(f"| #{n} | {o['titel'].replace('|', '/')} | {hvem} | {emne} | {dl} |")
+        if any(o["fordeling"]["via_emne"] for _, o in oprettet):
+            dele.append("\n¹ Ingen fra bestyrelsen stod på opgaven, så den er lagt hos den, der har emnet "
+                        "(se `config.js`).")
+        if any(not o["fordeling"]["bestyrelse"] and not o["fordeling"]["alle"] for _, o in oprettet):
+            dele.append("\n² Ingen i bestyrelsen har emnet – opgaven står under *Uden ansvarlig* til næste møde.")
+        if andre_navne:
+            dele.append(f"\nℹ️ {og_liste(andre_navne)} er ikke i bestyrelsen og får ikke en label – navnene står "
+                        "forrest i opgaven i stedet.")
     else:
         dele.append("Der var ingen nye opgaver at oprette.")
     if sprunget:
@@ -489,6 +781,99 @@ def behandl_import(issue, kendte):
     kommenter(nr, "\n".join(dele))
     kald("POST", f"/issues/{nr}/labels", {"labels": [sikr_label(*IMPORT_LABEL, kendte)]})
     kald("PATCH", f"/issues/{nr}", {"state": "closed", "state_reason": "completed"})
+    return True
+
+
+# ----------------------------------------------------------------------------- ret opgaver
+def er_import(i):
+    return (i.get("title") or "").lstrip().startswith("📥") or \
+        any((l["name"] if isinstance(l, dict) else l).lower() == IMPORT_LABEL[0] for l in i.get("labels", []))
+
+
+def er_opgave(i):
+    if i.get("pull_request") or er_import(i):
+        return False
+    if (i.get("user") or {}).get("login") == "github-actions[bot]":
+        return True
+    return (i.get("author_association") or "OWNER") in ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+def uden_deadline(titel):
+    m = SLUT_PARENTES.search(titel or "")
+    if m and find_dato(m.group(0)):
+        return titel[:m.start()].rstrip(), titel[m.start():]
+    return titel or "", ""
+
+
+def ret_opgave(issue, medlemmer, kendte):
+    """Sørger for, at en opgave kun har personer fra bestyrelsen og et emne. Returnerer True, hvis
+    noget blev ændret. Gør ingenting, hvis opgaven allerede er i orden."""
+    nr = issue["number"]
+    navne = [l["name"] if isinstance(l, dict) else l for l in issue.get("labels", [])]
+    personer_raa = [n[1:].strip() for n in navne if n.startswith("@") and n[1:].strip()]
+    oevrige = [n for n in navne if not n.startswith("@")]
+    emne = next((find_emne(n) for n in oevrige if find_emne(n)), None)
+    tekst, deadline = uden_deadline(issue.get("title") or "")
+    hel = re.search(r"(?:^|\n)Hele opgaven:[ \t]*([\s\S]+?)\s*$", issue.get("body") or "")
+    gaet_tekst = hel.group(1) if hel else tekst
+    f = fordel(personer_raa, tekst, medlemmer, emne=emne or gaet_emne(gaet_tekst, personer_raa))
+    nye = oevrige[:]
+    for p in person_labels(f, kendte):
+        if p not in nye:
+            nye.append(p)
+    if not emne:
+        el = emne_label(f["emne"], kendte)
+        if el and el not in nye:
+            nye.append(el)
+    ny_titel = f["titel"] + (" " + deadline.strip() if deadline else "")
+    if len(ny_titel) > 250:
+        ny_titel = issue.get("title") or ""
+    gamle = sorted(navne)
+    if sorted(nye) == gamle and ny_titel == (issue.get("title") or ""):
+        return False
+    aendring = {"labels": nye}
+    if ny_titel != (issue.get("title") or ""):
+        aendring["title"] = ny_titel
+    kald("PATCH", f"/issues/{nr}", aendring)
+    fjernet = [n for n in navne if n not in nye]
+    tilfoejet = [n for n in nye if n not in navne]
+    print(f"#{nr} rettet: {ny_titel!r}  +{tilfoejet}  -{fjernet}")
+    return True
+
+
+def ryd_op(medlemmer, kendte):
+    """Kører ved "Run workflow": flytter opgaver fra folk uden for bestyrelsen til den rigtige person,
+    sætter emne på og sletter labels for personer, der ikke er i bestyrelsen."""
+    siden = (datetime.now(ZoneInfo("UTC")) - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    issues = hent_alle("/issues?state=open&per_page=100") + \
+        hent_alle(f"/issues?state=closed&per_page=100&since={siden}")
+    rettet = 0
+    for i in issues:
+        if not er_opgave(i):
+            continue
+        if ret_opgave(i, medlemmer, kendte):
+            rettet += 1
+            time.sleep(1)
+    slettet = []
+    for l in hent_alle("/labels?per_page=100"):
+        n = l["name"]
+        if not n.startswith("@") or not n[1:].strip():
+            continue
+        navn = n[1:].strip()
+        if navn.lower() in ALLE or navn == "Alle":
+            continue
+        fundet, via_rolle = find_medlem(navn, medlemmer)
+        if fundet and not via_rolle and lav_navn(navn) == lav_navn(fundet[0]):
+            continue                                   # et medlem af bestyrelsen
+        try:
+            kald("DELETE", f"/labels/{urllib.parse.quote(n, safe='')}")
+            kendte.pop(n.lower(), None)
+            slettet.append(n)
+        except ApiFejl as e:
+            if e.kode != 404:
+                raise
+    print(f"Oprydning: {rettet} opgaver rettet, {len(slettet)} labels slettet {slettet}")
+    return rettet, slettet
 
 
 def behandl_status(issue, ny_label):
@@ -514,12 +899,16 @@ def main():
     sti = os.environ.get("GITHUB_EVENT_PATH")
     data = json.load(open(sti, encoding="utf-8")) if sti and os.path.exists(sti) else {}
 
+    medlemmer = laes_bestyrelsen()
+    print("Bestyrelsen:", ", ".join(m["navn"] for m in medlemmer))
     kendte = hent_labels()
     for navn, (farve, beskrivelse) in STATUS.items():
         sikr_label(navn, farve, beskrivelse, kendte)
     sikr_label(*IMPORT_LABEL, kendte)
     if haendelse != "issues":
         print("Labels er på plads.")
+        if haendelse in ("workflow_dispatch", "push"):
+            ryd_op(medlemmer, kendte)
         return 0
 
     issue = data.get("issue") or {}
@@ -529,7 +918,10 @@ def main():
     if handling == "labeled":
         behandl_status(issue, (data.get("label") or {}).get("name", ""))
     elif handling in ("opened", "edited", "reopened"):
-        behandl_import(issue, kendte)
+        var_tabel = behandl_import(issue, kendte, medlemmer)
+        # En opgave oprettet direkte i GitHub: emne på, og ingen ansvarlig -> den, der har emnet
+        if not var_tabel and handling == "opened" and er_opgave(issue) and issue.get("state") == "open":
+            ret_opgave(issue, medlemmer, kendte)
     return 0
 
 

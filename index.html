@@ -380,6 +380,10 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
   const KONFIG = window.BESTYRELSE || {};
   const MELLEMMAND = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(String(KONFIG.mellemmand || "").trim())
     ? String(KONFIG.mellemmand).trim() : "";
+  // Bestyrelsen (config.js): kun de her vises som navne at vælge – også dem uden opgaver
+  const MEDLEMMER = (Array.isArray(KONFIG.medlemmer) ? KONFIG.medlemmer : []).map(function (m) {
+    return String(m && typeof m === "object" ? m.navn || "" : m || "").trim();
+  }).filter(Boolean);
   const VALG = [
     { id: "ny", navn: "Ikke startet" }, { id: "next", navn: "Next up" }, { id: "igang", navn: "I gang" },
     { id: "venter", navn: "Venter" }, { id: "faerdig", navn: "Færdig ✓" }, { id: "droppet", navn: "Droppet" }
@@ -391,12 +395,12 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
   // med emnets navn (fx "Økonomi" eller "Tøj") – den vinder over gættet.
   // Ord: almindelig tekst tæller 1 (højst 2 gange), "~ord" tæller ½, /regex/ tæller 1, {re, v} tæller v.
   const EMNER = [
-    { id: "oekonomi", navn: "Økonomi", ikon: "💰", personer: [/^kasserer(en|ne)?$/],
+    { id: "oekonomi", navn: "Økonomi", ikon: "💰", personer: [/^kasserer(en|ne|e)?$/],
       ord: ["økonomi", "kontingent", "betal", "faktura", "regnskab", "budget", "refusion", "mobilepay", "kasserer",
         "gæld", "penge", "takst", "udlæg", "indbetal", "opkræv", "bankkonto", "beløb", "~pris", "~gebyr", "tilskud", "moms", "løn"] },
     { id: "sponsor", navn: "Sponsorer & fonde", ikon: "🤝",
       ord: ["sponsor", "fond", "ansøgning", "bambusa", "kampagne", "donation", "partner", "~støtte", "lodseddel", "lotteri"] },
-    { id: "hold", navn: "Hold & turneringer", ikon: "🏐", personer: [/^(dame|herre|damer|herrer|mix|du|hu|u)\s?\d*$/],
+    { id: "hold", navn: "Hold & turneringer", ikon: "🏐",
       ord: ["jyllandsserie", "turnering", "licens", "kredskontakt", "melde fra", "kampprogram", "~serie", "division",
         "liga", "pokal", /\bmix\b/, "holdtilmeld", "~tilmeld", "spillere", { re: /\bspiller\b/, v: 0.5 },
         "dobbelt klub", "klubskifte", { re: /\b(dame|herre)\s?\d\b/, v: 0.5 }] },
@@ -427,9 +431,13 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
   (function () {          // gør ordene klar én gang: alt bliver til regex med vægt
     const esc = function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); };
     for (const e of EMNER) {
+      // \b kender ikke æ/ø/å – brug samme ordgrænser som robotten
+      const kilde = function (src) {
+        return src.replace(/^\\b/, "(?:^|[^a-z0-9æøåéü])").replace(/\\b$/, "(?=[^a-z0-9æøåéü]|$)");
+      };
       e.regler = e.ord.map(function (o) {
-        if (o instanceof RegExp) return { re: new RegExp(o.source, "g"), v: 1 };
-        if (o && o.re) return { re: new RegExp(o.re.source, "g"), v: o.v };
+        if (o instanceof RegExp) return { re: new RegExp(kilde(o.source), "g"), v: 1 };
+        if (o && o.re) return { re: new RegExp(kilde(o.re.source), "g"), v: o.v };
         const svag = o.charAt(0) === "~";
         return { re: new RegExp(esc(svag ? o.slice(1) : o), "g"), v: svag ? 0.5 : 1 };
       });
@@ -684,6 +692,7 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
     return (x - y) || (a.nr - b.nr);
   }
   function allePersoner() {
+    if (MEDLEMMER.length) return MEDLEMMER.slice().sort(da);
     const set = new Map();
     for (const o of S.opgaver) for (const p of o.personer) if (!set.has(lav(p))) set.set(lav(p), p);
     return Array.from(set.values()).sort(da);
@@ -1293,6 +1302,7 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
   const ny = { valgte: [] };
   function kendtePersoner() {
     const navne = allePersoner();
+    if (MEDLEMMER.length) return navne;          // kun bestyrelsen kan få opgaver
     for (const n of S.labelPersoner) if (!navne.some(function (x) { return lav(x) === lav(n); })) navne.push(n);
     return navne.sort(da);
   }

@@ -43,8 +43,11 @@ Robotten forstår:
 
 | I tabellen | Bliver til |
 |---|---|
-| `Søren`, `Emma og Jonas`, `Søren/Emma` | Én `@Navn`-label pr. person – laves automatisk |
+| `Søren`, `Emma og Ida`, `Søren/Emma` | Én `@Navn`-label pr. person – kun for bestyrelsen (se herunder) |
+| `Kassererne`, `Formanden` | Personerne med den rolle i `config.js` (fx Mikkel og Lars) |
 | `Alle` eller `Bestyrelsen` | *Hele bestyrelsen* – vises hos alle |
+| Navne uden for bestyrelsen, fx `Herre 1` eller `Maria (Dame 1)` | Ingen label – navnet skrives forrest i opgaven (`Herre 1: Står for julefrokosten`), og opgaven lægges hos den i bestyrelsen, der har emnet |
+| Tom *Person* | Opgaven lægges hos den, der har emnet – ellers *Uden ansvarlig* |
 | `3/10`, `3.10`, `3. okt`, `1/2-2027` | Deadline sidst i titlen, fx `Book hal (3/10)` |
 | `næste møde` | Datoen fra linjen `Næste møde: 21/10` øverst i issuet |
 | Anden tekst, fx `løbende` | Står i parentes efter opgaven |
@@ -52,6 +55,38 @@ Robotten forstår:
 
 Findes en opgave allerede (samme titel), springer robotten den over. Ingen tabel ved hånden?
 Skriv én opgave pr. linje: `Book hal til opstartsfest – Søren – 3/10`.
+
+## Bestyrelsen, emner og hvem der får opgaven
+
+Kun dem, der står under `medlemmer` i [`config.js`](https://github.com/Brebnhi/bestyrelse/edit/main/config.js),
+kan få opgaver. Det er også dem, man kan vælge øverst på siden – også hvis de ikke har nogen opgaver.
+
+Hver opgave får et **emne** (Økonomi, Sponsorer & fonde, Hold & turneringer, Trænere & kurser, Ungdom,
+Arrangementer & frivillige, Tøj & udstyr, Kommunikation, Haller & lokaler, Forening & bestyrelse – eller
+Andet), som robotten gætter ud fra ordene i opgaven og sætter som label. Står der ikke nogen fra bestyrelsen
+på en opgave, lægger robotten den hos den, der har emnet under `emner` i `config.js`:
+
+| Emne | Hos |
+|---|---|
+| Økonomi | Mikkel og Lars |
+| Sponsorer & fonde | Heidi |
+| Ungdom | Anna |
+| Tøj & udstyr | Emma |
+| Arrangementer & frivillige | Ida |
+| Hold & turneringer | Marcel |
+| Forening & bestyrelse | Søren |
+
+De andre emner har ingen fast person – de opgaver står under *Uden ansvarlig*, indtil nogen tager
+dem. Gætter robotten forkert, så skift emne-labelen eller `@Navn`-labelen i GitHub.
+
+**Ny i bestyrelsen?** Tilføj en linje under `medlemmer` i `config.js` (fx
+`{ "navn": "Jonas", "rolle": "", "emner": [] },`) og tryk **Commit changes**. Går nogen ud, så
+slet linjen.
+
+**Ryd op:** Kør robotten én gang under **Actions → Bestyrelsens robot → Run workflow** efter
+en ændring i bestyrelsen. Den flytter opgaver fra folk, der ikke er i bestyrelsen, hen til den
+rigtige person, sætter navnet forrest i opgaven, sætter emne på og sletter de forkerte labels.
+Opgaver, der allerede er i orden, røres ikke.
 
 ## Status
 
@@ -89,11 +124,10 @@ Opsætning (én gang):
 Nøglen ligger kun i dit Google-script – aldrig her i det offentlige repo. Vil du lukke for det,
 så slet nøglen på GitHub under *Settings → Developer settings → Fine-grained tokens*.
 
-## Nyt bestyrelsesmedlem
+## Personligt link
 
-Robotten laver `@Navn`-labelen, første gang personen står i en tabel. Send personen linket
-`https://brebnhi.github.io/bestyrelse/?person=Fornavn` – eller vælg navnet på siden og tryk
-**🔗 Kopiér … link**.
+Send hvert bestyrelsesmedlem linket `https://brebnhi.github.io/bestyrelse/?person=Fornavn` –
+eller vælg navnet på siden og tryk **🔗 Kopiér … link**.
 
 ## Godt at vide
 
@@ -112,8 +146,8 @@ Robotten laver `@Navn`-labelen, første gang personen står i en tabel. Send per
 | Fil | Hvad |
 |---|---|
 | `index.html` | Siden. Slås til under **Settings → Pages → Deploy from a branch → main / (root)**. |
-| `config.js` | Adressen på mellemmanden. |
-| `robot.py` | Robotten: labels, tabel → opgaver, status-labels. |
+| `config.js` | Adressen på mellemmanden og hvem der er i bestyrelsen (læses af både siden og robotten). |
+| `robot.py` | Robotten: labels, tabel → opgaver, emner, status-labels og oprydning. |
 | `.github/workflows/robot.yml` | Starter robotten, når du opretter, retter eller labeler et issue. |
 
 Robotten kører under **Actions → Bestyrelsens robot**. Mellemmanden ligger i dit Google Apps
