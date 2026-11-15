@@ -52,6 +52,26 @@ Fanen **Til mødet** samler det, bestyrelsen skal igennem under *godkendelse af 
 **📋 Kopiér til referatet** lægger det hele som to tabeller i udklipsholderen – klar til at sætte ind i
 referatet i Google Docs.
 
+**📄 Lav mødedokument** skriver opgaverne direkte ind i dokumentet til næste møde i Drev
+(*1. Referater → 2026-2027*, fx *6. møde - 18.11.2026*):
+
+- Hver opgave står under det punkt på dagsordenen, den hører til – de klarede (✅ med resultatet, ✖️ hvis
+  droppet) og de åbne (⏳ status, deadline og seneste nyt · ⚠️ hvis der ikke er givet status siden mødet).
+- Under punkt 1 står et overblik: hvor mange der er klaret og åbne, og hvem der mangler at give status.
+- Findes dokumentet ikke, laver knappen det ud fra *Skabelon bestyrelsesmøde AAV* – med navnet
+  *7. møde - 16.12.2026*, dato og tid, sted (fra sidste referat), deltagere og opgavetabellen nederst.
+- **Tryk igen**, når folk har givet status – så bliver linjerne skrevet om med det nyeste. Resten af
+  dokumentet røres ikke, og en linje, nogen har skrevet i, får lov at stå. Skriv referatet under linjerne.
+
+*Hvilket punkt?* Knappen kigger i sidste referat efter, hvor opgaven blev drøftet. Står den ikke dér,
+bestemmer emnet (*Økonomi* → Økonomi, *Arrangementer* → Årshjul, mix/DS/division → holdenes punkter,
+ellers *Eventuelt*). Lander en opgave forkert, så giv den en label i GitHub med punktets navn, fx
+`Mixholdene` eller `Hal` – den vinder. Siden får ikke dokumentets adresse (den bliver i Drev); knappen
+**🔎 6. møde - 18.11.2026** søger efter det i din egen Drev.
+
+**Ny sæson:** lav mappen `2027-2028` i *1. Referater* ved siden af skabelonen. Knappen lægger nye
+dokumenter i den nyeste sæsonmappe og tæller møderne derfra (*1. møde - …*).
+
 **Sikringen:** en uge før mødet får hver person et lille banner på siden, hvis nogle af deres opgaver
 ikke har fået en status siden sidste møde. **Giv status** går dem igennem én ad gangen (*Ikke nået
 endnu*, *I gang*, *Venter på andre* eller *Færdig ✓* og en kort tekst) – det tager et minut.
@@ -143,13 +163,28 @@ mellemmand*: et lille Google Apps Script i din Google-konto med en GitHub-nøgle
 issues i det her repo. Koden står i [`mellemmand.gs`](mellemmand.gs) (uden nøgle). Adressen på
 mellemmanden står i `config.js`; er den tom, kan siden kun vise opgaverne.
 
-Mellemmanden kan oprette og rette opgaver, tage/lægge tilbage, skifte status, skrive i logbogen og sætte
-næste møde – ikke slette noget. Den tjekker, at navnene står i `config.js`, og bremser, hvis nogen laver
+Mellemmanden kan oprette og rette opgaver, tage/lægge tilbage, skifte status, skrive i logbogen, sætte
+næste møde og skrive opfølgningen i mødedokumentet i Drev – ikke slette noget. Den tjekker, at navnene står i `config.js`, og bremser, hvis nogen laver
 over 150 ændringer i timen. Rammer et netværk GitHubs grænse for opslag uden login, henter siden
 opgaverne gennem mellemmanden i stedet.
 
 Nøglen ligger i scriptets indstillinger (⚙️ **Projektindstillinger → Scriptegenskaber**, som `NOEGLE`) –
 ikke i koden. Så kan koden skiftes ud uden at røre nøglen.
+
+**Opdatering til version 3** (mødedokumentet – én gang):
+
+1. Upload `index.html`, `mellemmand.gs` og `README.md` til repoet (**Add file → Upload files**).
+2. [script.google.com](https://script.google.com) → **Bestyrelsens mellemmand** → **<>** (Editor). Åbn
+   [`mellemmand.gs`](mellemmand.gs) her i repoet, klik på kopi-ikonet øverst til højre over koden, klik i
+   koden i Apps Script, tryk **Cmd+A** og **Cmd+V** (Ctrl på Windows) og **Gem** 💾.
+3. **Giv lov til Drev og Docs:** vælg `tjekReferat` i rullemenuen øverst og tryk **Kør** → *Gennemgå
+   tilladelser* → vælg din konto → *Avanceret* → *Gå til Bestyrelsens mellemmand* → **Tillad**. Loggen
+   nederst viser, hvad knappen vil gøre (næste møde, dokumentet og hvor opgaverne kommer hen) – den
+   skriver ikke noget.
+4. **Udgiv:** **Implementer → Administrer implementeringer** → blyanten ✏️ → *Version:* **Ny version** →
+   **Implementer**.
+
+Indtil trin 4 er gjort, siger knappen på siden, at mellemmanden skal opdateres – alt andet virker som før.
 
 **Opdatering fra version 1** (én gang):
 
@@ -195,6 +230,8 @@ gamle kode, så lav bare en ny (trin 1 under *Første opsætning*) og læg den u
 - **Gør ikke repoet privat** – så kan siden ikke længere læse opgaverne.
 - **Se et eksempel:** https://brebnhi.github.io/bestyrelse/?eksempel – her kan man prøve alt uden at
   gemme noget.
+- **Mødedokumenterne bliver i Drev.** Mellemmanden skriver i dem som formandens Google-konto, så den skal
+  have lov at redigere i sæsonmappen. Hverken siden eller repoet får indholdet eller adressen.
 
 ## Filer
 
@@ -204,7 +241,7 @@ gamle kode, så lav bare en ny (trin 1 under *Første opsætning*) og læg den u
 | `config.js` | Bestyrelsen, ASAP-dage og adressen på mellemmanden (læses af siden, robotten og mellemmanden). |
 | `robot.py` | Robotten: tabel → opgaver, deadlines med ord, emner, status-labels, mødedatoer og oprydning. |
 | `.github/workflows/robot.yml` | Starter robotten ved nye/rettede issues, og når `config.js` eller `robot.py` opdateres. |
-| `mellemmand.gs` | Koden til mellemmanden i Google Apps Script (uden nøgle). |
+| `mellemmand.gs` | Koden til mellemmanden i Google Apps Script (uden nøgle) – også mødedokumentet (afsnittet *MØDEDOKUMENTET*). |
 | `manifest.webmanifest`, `sw.js`, `ikoner/` | Gør, at siden kan lægges på hjemmeskærmen som en app og åbne uden net. |
 
 Robotten kører under **Actions → Bestyrelsens robot**. Omdøber du repoet, så ret `REPO` øverst i

@@ -2241,7 +2241,8 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
         el("p", { class: "mv-sub" }, "Det, der er sket siden ", sidsteMoede() && !S.moedeSiden ? "mødet " : "", sidenInp)),
       el("div", { class: "handling" },
         mine.length && kanRette() ? el("button", { class: "knap", type: "button", onclick: startRunde }, "Giv status på dine (" + mine.length + ")") : null,
-        el("button", { class: "knap sekundaer", type: "button", onclick: function (ev) { kopierReferat(ev, siden); } }, "📋 Kopiér til referatet"))));
+        el("button", { class: "knap sekundaer", type: "button", onclick: function (ev) { kopierReferat(ev, siden); } }, "📋 Kopiér til referatet"),
+        dokKnapper(n))));
     if (data.klar.length) {
       v.append(el("div", { class: "klar", "aria-label": "Status fra bestyrelsen" }, data.klar.map(function (k) {
         return k.mangler ? el("span", { class: "chip mangler", title: k.mangler + " opgaver mangler en status" }, k.navn + " · " + k.mangler + " mangler")
@@ -2294,6 +2295,65 @@ footer{margin-top:36px;color:var(--muted);font-size:12.5px;display:flex;flex-wra
       h += "</table>";
     }
     return { tekst: t.join("\n"), html: h };
+  }
+  // ------------------------------------------------------------------ mødedokumentet i Drev (gennem mellemmanden)
+  // Mellemmanden finder dokumentet til næste møde i Drev (eller laver det ud fra skabelonen) og skriver
+  // opgaverne ind under de punkter, de hører til. Trykkes der igen, skrives linjerne om med nyeste status.
+  // Siden får ikke dokumentets adresse (den bliver i Drev) – linket søger efter navnet i ens egen Drev.
+  function gemtDok(n) {
+    const g = n ? laesJson("dok:" + iso(n), null) : null;
+    return g && typeof g.navn === "string" && g.navn ? g : null;
+  }
+  function drevSoeg(navn) { return "https://drive.google.com/drive/search?q=" + encodeURIComponent('"' + navn + '"'); }
+  function dokKnapper(n) {
+    if (!kanRette()) return null;
+    const gemt = gemtDok(n);
+    const knap = el("button", { class: "knap sekundaer", type: "button", disabled: !n || S.dokSender,
+      title: n ? "Skriver opgaverne ind under punkterne i dokumentet til mødet i Drev – og laver det ud fra skabelonen, hvis det ikke findes. Tryk igen for at opdatere linjerne."
+        : "Sæt datoen for næste møde først (📅 øverst)",
+      onclick: function () { kraevMig(function () { lavMoedeDok(n); }); } },
+      S.dokSender ? "📄 Skriver i mødedokumentet …" : gemt ? "📄 Opdatér mødedokumentet" : "📄 Lav mødedokument");
+    return [knap, gemt ? el("a", { class: "knap sekundaer", href: drevSoeg(gemt.navn), target: "_blank", rel: "noopener",
+      title: "Søger efter dokumentet i din Drev" + (gemt.mappe ? " (det ligger i mappen " + gemt.mappe + ")" : "") }, "🔎 " + gemt.navn + " ↗") : null];
+  }
+  async function lavMoedeDok(n) {
+    if (!n || S.dokSender) return;
+    if (S.kilde === "eksempel") {
+      visBesked("Eksempel – her skriver mellemmanden opgaverne ind i dokumentet til mødet " + moedeNavn(n));
+      return;
+    }
+    S.dokSender = true;
+    vis();
+    visBesked("Skriver opgaverne ind i mødedokumentet i Drev … det tager et øjeblik", false, true);
+    let svar;
+    try {
+      const r = await fetch(MELLEMMAND, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ id: uid(), version: 3, handling: "referat", af: S.mig, moede: iso(n) })
+      });
+      try { svar = await r.json(); }
+      catch (e) { svar = { ok: false, version: 3, fejl: "mellemmanden svarede ikke som forventet (HTTP " + r.status + ")" }; }
+    } catch (e) {
+      svar = { ok: false, net: true };
+    }
+    S.dokSender = false;
+    if (svar && svar.ok) {
+      skriv("dok:" + iso(n), JSON.stringify({ navn: svar.navn, mappe: svar.mappe || "", tid: Date.now() }));
+      visBesked("📄 " + svar.navn + (svar.oprettet ? " er lavet ud fra skabelonen" + (svar.mappe ? " i " + svar.mappe : "") : " er opdateret") +
+        " – " + svar.klaret + " klaret og " +
+        svar.aabne + " åbne står under punkterne" + (svar.bevaret ? " (" + svar.bevaret + (svar.bevaret === 1 ? " linje" : " linjer") +
+        ", som nogen havde skrevet i, er ladt stå)" : "") + ". Skriv referatet under linjerne.", false, true);
+      clearTimeout(beskedTimer);
+      beskedTimer = setTimeout(function () { $("besked").hidden = true; }, 12000);
+    } else if (svar && svar.net) {
+      visBesked("Kunne ikke nå mellemmanden – tjek forbindelsen og prøv igen", true);
+    } else if (!svar || !svar.version || svar.version < 3 || /Ukendt handling/.test(svar.fejl || "")) {
+      visBesked("Mellemmanden skal opdateres til version 3, før knappen virker – formanden kan se hvordan i README", true);
+    } else {
+      visBesked("Kunne ikke lave mødedokumentet – " + (svar.fejl || "ukendt fejl"), true);
+    }
+    vis();
   }
   async function kopierReferat(ev, siden) {
     const k = ev.currentTarget, r = referat(siden);
