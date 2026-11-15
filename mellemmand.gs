@@ -646,6 +646,8 @@ const GRAA = "#5f6368";
 // version 3: så giver du den lov til at bruge Google Drev og Docs, og loggen viser, hvad knappen vil gøre.
 // Den skriver ikke noget.
 function tjekReferat() {
+  // Beder Google om lov til alt, mellemmanden bruger (Drev og Docs) – på én gang, før der sker noget
+  if (typeof ScriptApp.requireAllScopes === "function") ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
   const k = konfig();
   const mapper = moedeMapper();
   Logger.log("Skabelon: " + mapper.skabelon.getName() + " ✓");
@@ -701,9 +703,13 @@ function mappeNavn(fil) {
   return it.hasNext() ? it.next().getName() : "";
 }
 // Mangler mellemmanden lov i Drev, siges det, så man kan gøre noget ved det
+const MANGLER_LOV = "Mellemmanden mangler lov til Google Drev og Docs. Formanden skal åbne mellemmanden i Apps Script, " +
+  "køre tjekReferat og trykke Tillad (se README).";
 function drevFejl(e, hvad) {
   if (typeof e === "string") return e;
-  if (/access denied|adgang nægtet|permission|tilladelse|insufficient/i.test(String(e && e.message || e))) {
+  const t = String(e && e.message || e);
+  if (/googleapis\.com\/auth\//.test(t)) return MANGLER_LOV;                 // Google mangler formandens tilladelse
+  if (/access denied|adgang nægtet|permission|tilladelse|insufficient/i.test(t)) {
     return "Mellemmanden må ikke skrive i " + hvad + " i Drev. Den kører som formandens Google-konto, så dokumentet " +
       "(eller mappen) skal være delt med den som redaktør.";
   }

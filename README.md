@@ -177,10 +177,11 @@ ikke i koden. Så kan koden skiftes ud uden at røre nøglen.
 2. [script.google.com](https://script.google.com) → **Bestyrelsens mellemmand** → **<>** (Editor). Åbn
    [`mellemmand.gs`](mellemmand.gs) her i repoet, klik på kopi-ikonet øverst til højre over koden, klik i
    koden i Apps Script, tryk **Cmd+A** og **Cmd+V** (Ctrl på Windows) og **Gem** 💾.
-3. **Giv lov til Drev og Docs:** vælg `tjekReferat` i rullemenuen øverst og tryk **Kør** → *Gennemgå
-   tilladelser* → vælg din konto → *Avanceret* → *Gå til Bestyrelsens mellemmand* → **Tillad**. Loggen
-   nederst viser, hvad knappen vil gøre (næste møde, dokumentet og hvor opgaverne kommer hen) – den
-   skriver ikke noget.
+3. **Giv lov til Drev og Docs:** vælg `tjekReferat` i rullemenuen øverst og tryk **Kør** → *Se
+   tilladelser* → vælg din konto → *Avancerede indstillinger* → *Gå til Bestyrelsens mellemmand* →
+   sæt flueben ved det hele, hvis Google spørger → **Fortsæt/Tillad**. Kør `tjekReferat` igen, hvis den
+   spørger en gang til. Loggen nederst viser, hvad knappen vil gøre (næste møde, dokumentet og hvor
+   opgaverne kommer hen) – den skriver ikke noget.
 4. **Udgiv:** **Implementer → Administrer implementeringer** → blyanten ✏️ → *Version:* **Ny version** →
    **Implementer**.
 
